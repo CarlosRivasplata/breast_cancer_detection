@@ -59,4 +59,18 @@ venv.bak/
 # OS
 .DS_Store
 Thumbs.db
-*.db 
+*.db
+
+# Trash directories and files
+*.Trash-1000
+.trash/
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
+*.log
+logs/
+temp/
+tmp/

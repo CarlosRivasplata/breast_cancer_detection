@@ -7,6 +7,8 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from sklearn.metrics import precision_score, recall_score, f1_score
 from tqdm.notebook import tqdm
 
+from training.early_stopping import EarlyStopping
+
 
 def train_epoch(model, loader, criterion, optimizer, device):
     """
@@ -89,7 +91,8 @@ class Trainer:
 
     def __init__(self, model: nn.Module, device: torch.device,
                  optimizer: Optimizer, criterion: nn.Module,
-                 scheduler: ReduceLROnPlateau = None):
+                 scheduler: ReduceLROnPlateau = None,
+                 early_stopping: EarlyStopping = None):
         """
         Initialize Trainer.
 
@@ -99,6 +102,7 @@ class Trainer:
             optimizer (Optimizer): Optimizer to use (e.g., Adam).
             criterion (nn.Module): Loss function.
             scheduler (ReduceLROnPlateau, optional): Learning rate scheduler.
+            early_stopping: EarlyStopping class to stop before overfitting.
         """
         self.model = model.to(device)
         self.device = device
@@ -118,6 +122,8 @@ class Trainer:
         self.best_model_wts = None
         self.best_val_recall = float("-inf")
         self.save_path = None
+        self.early_stopping = early_stopping
+
 
     def fit(self, train_loader, val_loader, epochs=20):
         """
@@ -146,7 +152,8 @@ class Trainer:
             if self.scheduler:
                 self.scheduler.step(val_acc)
 
-            # Track the best model by validation accuracy
+            # Track the best model by validation recall
+            # I want to penalize the false negatives the most
             if val_recall > self.best_val_recall:
                 self.best_val_recall = val_recall
                 self.best_model_wts = self.model.state_dict()
@@ -156,6 +163,24 @@ class Trainer:
                 f"Val Acc: {val_acc:.2f}% | Recall: {val_recall:.4f} | "
                 f"Precision: {val_precision:.4f} | F1: {val_f1:.4f}"
             )
+
+            if self.early_stopping:
+                # Value lookup
+                monitored_value = {
+                    "val_loss": val_loss,
+                    "val_acc": val_acc,
+                    "val_recall": val_recall,
+                    "val_precision": val_precision,
+                    "val_f1": val_f1,
+                }.get(self.early_stopping.monitor)
+
+                if monitored_value is None:
+                    raise ValueError(f"Unknown metric: {self.early_stopping.monitor}. Valid metrics are {list(monitored_value.keys())}")
+
+                stop = self.early_stopping.step(monitored_value)
+                if stop:
+                    print(f"Early stopping triggered at epoch {epoch + 1} (no improvement in {self.early_stopping.monitor}).")
+                    break
 
     def evaluate(self, test_loader):
         """
@@ -198,7 +223,7 @@ class Trainer:
         self.save_path = save_path
         if self.best_model_wts:
             torch.save(self.best_model_wts, self.save_path)
-            print(f"Best model saved to: {self.save_path} (val_acc: {self.best_val_recall:.2f}%)")
+            print(f"Best model saved to: {self.save_path} (val_recall: {self.best_val_recall:.2f}%)")
         else:
             print("No best model weights available to save.")
 
