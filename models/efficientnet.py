@@ -34,11 +34,7 @@ class EfficientNetModel(BaseModel):
         Returns:
             transforms.Compose: A torchvision transform pipeline.
         """
-        return transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.ToTensor(),                    # returns shape [1, H, W]
-            transforms.Normalize(mean=[0.5], std=[0.5])  # normalize grayscale
-        ])
+        return super().get_transforms()
 
 
     def get_backbone(self) -> nn.Module:

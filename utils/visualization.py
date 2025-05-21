@@ -42,7 +42,7 @@ def plot_confusion_matrix(y_true, y_pred, class_names=None, title="Confusion Mat
 
 def plot_training_history(history, model_name="Model"):
     """
-    Plot loss and key evaluation metrics over epochs.
+    Plot loss and key evaluation metrics over epochs with vertical lines at each epoch.
 
     Args:
         history (dict): Output from `trainer.get_history()`.
@@ -55,6 +55,8 @@ def plot_training_history(history, model_name="Model"):
     plt.subplot(1, 2, 1)
     plt.plot(epochs, history["train_loss"], label="Train Loss")
     plt.plot(epochs, history["val_loss"], label="Val Loss")
+    for epoch in epochs:
+        plt.axvline(x=epoch, color="gray", linestyle="--", linewidth=0.3)
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
     plt.title(f"{model_name} - Loss per Epoch")
@@ -66,6 +68,8 @@ def plot_training_history(history, model_name="Model"):
     plt.plot(epochs, history["val_recall"], label="Recall")
     plt.plot(epochs, history["val_precision"], label="Precision")
     plt.plot(epochs, history["val_f1"], label="F1 Score")
+    for epoch in epochs:
+        plt.axvline(x=epoch, color="gray", linestyle="--", linewidth=0.3)
     plt.xlabel("Epoch")
     plt.ylabel("Score")
     plt.title(f"{model_name} - Metrics per Epoch")
