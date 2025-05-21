@@ -5,7 +5,7 @@ from models.base_model import BaseModel
 
 
 class ResNetModel(BaseModel):
-    def __init__(self, num_classes=3, use_pretrained=True):
+    def __init__(self, num_classes=3, use_pretrained=True, dropout_rate=0.5):
         """
         Initialize the ResNet50 model strategy.
 
@@ -15,6 +15,7 @@ class ResNetModel(BaseModel):
         """
         self.weights = ResNet50_Weights.DEFAULT if use_pretrained else None
         self.num_classes = num_classes
+        self.dropout_rate = dropout_rate
 
     def get_model(self) -> nn.Module:
         """
@@ -24,7 +25,11 @@ class ResNetModel(BaseModel):
             nn.Module: A ResNet50 model adapted to the specified number of classes.
         """
         model = resnet50(weights=self.weights)
-        model.fc = nn.Linear(model.fc.in_features, self.num_classes)
+        in_features = model.fc.in_features
+        model.fc = nn.Sequential(
+            nn.Dropout(p=self.dropout_rate),
+            nn.Linear(in_features, self.num_classes)
+        )
         return model
 
     def get_transforms(self) -> transforms.Compose:

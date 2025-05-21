@@ -5,7 +5,7 @@ from models.base_model import BaseModel
 
 
 class EfficientNetModel(BaseModel):
-    def __init__(self, num_classes=3, use_pretrained=True):
+    def __init__(self, num_classes=3, use_pretrained=True, dropout_rate=0.5):
         """
         Initialize the EfficientNet-B0 model strategy.
 
@@ -15,6 +15,7 @@ class EfficientNetModel(BaseModel):
         """
         self.weights = EfficientNet_B0_Weights.DEFAULT if use_pretrained else None
         self.num_classes = num_classes
+        self.dropout_rate = dropout_rate
 
     def get_model(self) -> nn.Module:
         """
@@ -24,7 +25,11 @@ class EfficientNetModel(BaseModel):
             nn.Module: An EfficientNet-B0 model adapted to the specified number of classes.
         """
         model = efficientnet_b0(weights=self.weights)
-        model.classifier[1] = nn.Linear(model.classifier[1].in_features, self.num_classes)
+        in_features = model.classifier[1].in_features
+        model.classifier[1] = nn.Sequential(
+            nn.Dropout(p=self.dropout_rate),
+            nn.Linear(in_features, self.num_classes)
+        )
         return model
 
     def get_transforms(self) -> transforms.Compose:
