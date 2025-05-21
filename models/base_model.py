@@ -9,18 +9,26 @@ class BaseModel(ABC):
         pass
 
     @abstractmethod
-    def get_transforms(self) -> transforms.Compose:
+    def get_transforms(self, train: bool = True) -> transforms.Compose:
         """Return the appropriate torchvision transform pipeline."""
-        return transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.RandomHorizontalFlip(p=0.5),
-            transforms.RandomRotation(degrees=5),
-            transforms.RandomAffine(degrees=0, translate=(0.02, 0.02), scale=(0.98, 1.02)),
-            transforms.ColorJitter(brightness=0.1, contrast=0.1),
-            transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 1.0)),
+        t = self.config.transforms
+        transform_list = [transforms.Resize((t.resize, t.resize))]
+
+        if train and t.use_augmentations:
+            transform_list += [
+                transforms.RandomHorizontalFlip(p=t.horizontal_flip_prob),
+                transforms.RandomRotation(degrees=t.rotation_degrees),
+                transforms.RandomAffine(degrees=0, translate=(t.translate, t.translate), scale=(t.scale_min, t.scale_max)),
+                transforms.ColorJitter(brightness=t.brightness, contrast=t.contrast),
+                transforms.GaussianBlur(kernel_size=3, sigma=(t.blur_sigma_min, t.blur_sigma_max))
+            ]
+
+        transform_list += [
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5], std=[0.5])
-        ])
+            transforms.Normalize(mean=[t.normalize_mean], std=[t.normalize_std])
+        ]
+
+        return transforms.Compose(transform_list)
 
     def get_backbone(self) -> nn.Module:
         """
