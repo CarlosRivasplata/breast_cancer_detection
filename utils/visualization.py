@@ -13,13 +13,31 @@ def save_training_history_to_csv(history, path="training_history.csv"):
         history (dict): Trainer history from `trainer.get_history()`.
         path (str): File path for CSV.
     """
-    df = pd.DataFrame(history)
+    base_history = {k: v for k, v in history.items() if k != "val_views"}
+    df = pd.DataFrame(base_history)
     df.index.name = "epoch"
     df.to_csv(path)
-    print(f"Training history saved to {path}")
+    print(f"Training history (global metrics) saved to {path}")
+
+    # Save per-view metrics separately
+    if "val_views" in history:
+        view_records = []
+        for (view, metric), values in history["val_views"].items():
+            for epoch, value in enumerate(values):
+                view_records.append({
+                    "epoch": epoch,
+                    "view": view,
+                    "metric": metric,
+                    "value": value
+                })
+        view_df = pd.DataFrame(view_records)
+        view_path = path.replace(".csv", "_views.csv")
+        view_df.to_csv(view_path, index=False)
+        print(f"Per-view metrics saved to {view_path}")
 
 
-def plot_confusion_matrix(y_true, y_pred, class_names=None, title="Confusion Matrix"):
+
+def plot_confusion_matrix(y_true, y_pred, class_names=None, title="Confusion Matrix", cmap="Blues"):
     """
     Plot a confusion matrix using seaborn heatmap.
 
@@ -28,17 +46,18 @@ def plot_confusion_matrix(y_true, y_pred, class_names=None, title="Confusion Mat
         y_pred (List[int]): Predicted labels.
         class_names (List[str], optional): Class label names.
         title (str): Plot title.
+        cmap (str): Matplotlib colormap name for the heatmap.
     """
     cm = confusion_matrix(y_true, y_pred)
     plt.figure(figsize=(6, 5))
-    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues",
+    sns.heatmap(cm, annot=True, fmt="d", cmap=cmap,
                 xticklabels=class_names, yticklabels=class_names)
     plt.xlabel("Predicted")
     plt.ylabel("Actual")
     plt.title(title)
     plt.tight_layout()
     plt.show()
-
+    
 
 def plot_training_history(history, model_name="Model"):
     """
@@ -51,7 +70,6 @@ def plot_training_history(history, model_name="Model"):
     epochs = range(1, len(history["train_loss"]) + 1)
     plt.figure(figsize=(15, 6))
 
-    # --- Plot losses ---
     plt.subplot(1, 2, 1)
     plt.plot(epochs, history["train_loss"], label="Train Loss")
     plt.plot(epochs, history["val_loss"], label="Val Loss")
@@ -62,7 +80,6 @@ def plot_training_history(history, model_name="Model"):
     plt.title(f"{model_name} - Loss per Epoch")
     plt.legend()
 
-    # --- Plot metrics ---
     plt.subplot(1, 2, 2)
     plt.plot(epochs, history["val_acc"], label="Accuracy")
     plt.plot(epochs, history["val_recall"], label="Recall")
@@ -77,3 +94,15 @@ def plot_training_history(history, model_name="Model"):
 
     plt.tight_layout()
     plt.show()
+
+    if "val_views" in history:
+        plt.figure(figsize=(10, 5))
+        for (view, metric), values in history["val_views"].items():
+            if metric == "recall":
+                plt.plot(epochs[:len(values)], values, label=f"{view} recall")
+        plt.title(f"{model_name} - Per-View Recall")
+        plt.xlabel("Epoch")
+        plt.ylabel("Recall")
+        plt.legend()
+        plt.tight_layout()
+        plt.show()

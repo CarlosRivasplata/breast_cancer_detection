@@ -1,11 +1,11 @@
-# training/engine.py
-
 import torch
+import numpy as np
 from torch import nn
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from sklearn.metrics import precision_score, recall_score, f1_score
 from tqdm.notebook import tqdm
+from collections import defaultdict
 
 from training.early_stopping import EarlyStopping
 
@@ -42,27 +42,16 @@ def train_epoch(model, loader, criterion, optimizer, device):
 
 
 def evaluate_epoch(model, loader, criterion, device):
-    """
-    Evaluate the model on a dataset.
-
-    Args:
-        model (nn.Module): Model to evaluate.
-        loader (DataLoader): Validation/test data loader.
-        criterion (nn.Module): Loss function.
-        device (torch.device): Device to use.
-
-    Returns:
-        Tuple[float, float, float]: (accuracy %, avg loss, macro recall)
-    """
     model.eval()
     total_loss = 0.0
     total_correct = 0
     total_samples = 0
-    all_preds = []
-    all_labels = []
+    all_preds, all_labels = [], []
+
+    per_view = defaultdict(lambda: {"y_true": [], "y_pred": []})
 
     with torch.no_grad():
-        for images, labels in tqdm(loader, desc="Evaluating", leave=False):
+        for batch_idx, (images, labels) in enumerate(tqdm(loader, desc="Evaluating", leave=False)):
             images, labels = images.to(device), labels.to(device)
             outputs = model(images)
             loss = criterion(outputs, labels)
@@ -75,13 +64,36 @@ def evaluate_epoch(model, loader, criterion, device):
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
 
+            if hasattr(loader.dataset, "samples"):
+                for i, (_, view) in enumerate(loader.dataset.samples[batch_idx * loader.batch_size: batch_idx * loader.batch_size + images.size(0)]):
+                    per_view[view]["y_true"].append(labels[i].item())
+                    per_view[view]["y_pred"].append(preds[i].item())
+
     accuracy = total_correct / total_samples
     avg_loss = total_loss / total_samples
     recall = recall_score(all_labels, all_preds, average='macro')
     precision = precision_score(all_labels, all_preds, average='macro')
     f1 = f1_score(all_labels, all_preds, average='macro')
 
-    return accuracy, avg_loss, recall, precision, f1
+    per_view_metrics = {}
+    for view, d in per_view.items():
+        if d["y_true"]:
+            per_view_metrics[view] = {
+                "recall": recall_score(d["y_true"], d["y_pred"], average='macro'),
+                "precision": precision_score(d["y_true"], d["y_pred"], average='macro'),
+                "f1": f1_score(d["y_true"], d["y_pred"], average='macro'),
+                "accuracy": np.mean(np.array(d["y_true"]) == np.array(d["y_pred"]))
+            }
+
+    per_view_predictions = {
+        view: {
+            "y_true": d["y_true"],
+            "y_pred": d["y_pred"]
+        }
+        for view, d in per_view.items()
+    }
+
+    return accuracy, avg_loss, recall, precision, f1, per_view_metrics, per_view_predictions
 
 
 class Trainer:
@@ -117,6 +129,8 @@ class Trainer:
             "val_recall": [],
             "val_precision": [],
             "val_f1": [],
+            "val_views": defaultdict(list),
+            "val_view_predictions": [],
         }
 
         self.best_model_wts = None
@@ -138,22 +152,30 @@ class Trainer:
             print(f"\nEpoch {epoch + 1}/{epochs}")
 
             train_loss = train_epoch(self.model, train_loader, self.criterion, self.optimizer, self.device)
-            val_acc, val_loss, val_recall, val_precision, val_f1 = evaluate_epoch(
+
+            val_acc, val_loss, val_recall, val_precision, val_f1, val_views, val_view_predictions = evaluate_epoch(
                 self.model, val_loader, self.criterion, self.device
             )
 
             self.history["train_loss"].append(train_loss)
             self.history["val_loss"].append(val_loss)
-            self.history["val_acc"].append(val_acc) # Normalizing this one
+            self.history["val_acc"].append(val_acc)
             self.history["val_recall"].append(val_recall)
             self.history["val_precision"].append(val_precision)
             self.history["val_f1"].append(val_f1)
 
+            if "val_view_predictions" not in self.history:
+                self.history["val_view_predictions"] = []
+
+            self.history["val_view_predictions"].append(val_view_predictions)
+
+            for view, metrics in val_views.items():
+                for k, v in metrics.items():
+                    self.history["val_views"][(view, k)].append(v)
+
             if self.scheduler:
                 self.scheduler.step(val_acc)
 
-            # Track the best model by validation recall
-            # I want to penalize the false negatives the most
             if val_recall > self.best_val_recall:
                 self.best_val_recall = val_recall
                 self.best_model_wts = self.model.state_dict()
@@ -165,7 +187,6 @@ class Trainer:
             )
 
             if self.early_stopping:
-                # Value lookup
                 monitored_value = {
                     "val_loss": val_loss,
                     "val_acc": val_acc,
@@ -175,12 +196,16 @@ class Trainer:
                 }.get(self.early_stopping.monitor)
 
                 if monitored_value is None:
-                    raise ValueError(f"Unknown metric: {self.early_stopping.monitor}. Valid metrics are {list(monitored_value.keys())}")
+                    raise ValueError(
+                        f"Unknown metric: {self.early_stopping.monitor}. "
+                        f"Valid metrics are: val_loss, val_acc, val_recall, val_precision, val_f1"
+                    )
 
                 stop = self.early_stopping.step(monitored_value)
                 if stop:
                     print(f"Early stopping triggered at epoch {epoch + 1} (no improvement in {self.early_stopping.monitor}).")
                     break
+
 
     def evaluate(self, test_loader):
         """
