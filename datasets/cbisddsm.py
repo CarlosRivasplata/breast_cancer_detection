@@ -2,8 +2,8 @@ from torch.utils.data import Dataset
 import torch
 from pathlib import Path
 import pyarrow.parquet as pq
-from utils.dicom import load_dicom_image
-from utils.constants import IMAGES_ABS_PATH, LABEL_MAP
+from utils.dicom import load_image
+from utils.constants import TEXT_CLEANED_IMAGES_ABS_PATH, LABEL_MAP
 
 
 class CBISDDSMDataset(Dataset):
@@ -11,7 +11,7 @@ class CBISDDSMDataset(Dataset):
         self.table = pq.read_table(parquet_path).to_pandas()
         self.transform = transform
         self.label_map = label_map or LABEL_MAP
-        self.images_base_path = Path(images_base_path or IMAGES_ABS_PATH)
+        self.images_base_path = Path(images_base_path or TEXT_CLEANED_IMAGES_ABS_PATH)
         self.multi_view = multi_view
 
         if multi_view:
@@ -28,9 +28,12 @@ class CBISDDSMDataset(Dataset):
     def __getitem__(self, idx):
         row, view = self.samples[idx]
         path = row[f"{view}_path"].lstrip('/')
-        img = load_dicom_image(self.images_base_path / path)
+        img = load_image(self.images_base_path / path)
         if self.transform:
             img = self.transform(img)
-        img = img.repeat(3, 1, 1)
+
+        if img.shape[0] == 1:
+            img = img.repeat(3, 1, 1)
+
         label = self.label_map[row["pathology"]]
         return img, torch.tensor(label, dtype=torch.long)

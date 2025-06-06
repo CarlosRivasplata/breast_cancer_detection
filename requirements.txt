@@ -1,9 +1,19 @@
---extra-index-url https://download.pytorch.org/whl/cu118
-torch>=2.7.0
-torchvision>=0.18.0
-torchaudio>=2.7.0
-pillow
-pyarrow
-pydicom
-numpy
-tqdm 
+# Pillow and NumPy with Python 3.13 support
+pillow>=10.2.0
+numpy>=1.26.0
+
+# Medical image handling
+pydicom>=2.4.4
+
+# OCR engine (EasyOCR may require compatible PyTorch backend)
+easyocr==1.7.1
+torch>=2.1.0  # Minimum required by EasyOCR
+torchvision>=0.16.0
+torchaudio>=2.1.0
+
+# Data handling
+pandas>=2.2.0
+tqdm>=4.66.0
+
+# CLI utilities
+argparse; python_version < "3.10"  # Only needed for older Python

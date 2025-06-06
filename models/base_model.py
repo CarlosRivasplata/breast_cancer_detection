@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import torch
 import torch.nn as nn
 from torchvision import transforms
 
@@ -30,6 +31,7 @@ class BaseModel(ABC):
 
         return transforms.Compose(transform_list)
 
+    @abstractmethod
     def get_backbone(self) -> nn.Module:
         """
         Optional: Return model backbone without the classifier head.
@@ -37,3 +39,16 @@ class BaseModel(ABC):
         Useful for feature extraction or hybrid pipelines.
         """
         raise NotImplementedError("This model doesn't expose a backbone.")
+
+    @abstractmethod
+    def extract_features(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Extract features from the input tensor using the model's backbone.
+        
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, channels, height, width)
+            
+        Returns:
+            torch.Tensor: Extracted features from the model's backbone
+        """
+        raise NotImplementedError("This model doesn't support feature extraction.")

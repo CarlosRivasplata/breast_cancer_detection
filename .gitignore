@@ -4,6 +4,9 @@ data/
 CBIS-DDSM/
 */CBIS-DDSM/
 
+# Output
+output/
+
 # Model checkpoints
 *.pth
 *.pt

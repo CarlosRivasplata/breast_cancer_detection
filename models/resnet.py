@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 from torchvision.models import resnet50, ResNet50_Weights
 from torchvision import transforms
@@ -60,3 +61,17 @@ class ResNetModel(BaseModel):
         model = resnet50(weights=self.weights)
         backbone = nn.Sequential(*(list(model.children())[:-1]))
         return backbone
+
+    def extract_features(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Extract features from the input tensor using the model's backbone.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, channels, height, width)
+
+        Returns:
+            torch.Tensor: Extracted features from the model's backbone
+        """
+        x = self.get_backbone()(x)
+        x = torch.flatten(x, 1)
+        return x

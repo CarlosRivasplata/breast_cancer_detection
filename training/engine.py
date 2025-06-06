@@ -1,11 +1,15 @@
-import torch
+from collections import defaultdict
+from typing import Any
+
 import numpy as np
+import torch
+import torch.nn.functional as F
+from sklearn.metrics import f1_score, precision_score, recall_score, roc_auc_score
+from tqdm import tqdm
+from tqdm.notebook import tqdm
 from torch import nn
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from sklearn.metrics import precision_score, recall_score, f1_score
-from tqdm.notebook import tqdm
-from collections import defaultdict
 
 from training.early_stopping import EarlyStopping
 
@@ -42,18 +46,38 @@ def train_epoch(model, loader, criterion, optimizer, device):
 
 
 def evaluate_epoch(model, loader, criterion, device):
+    """
+    Run one epoch of evaluation.
+
+    Args:
+        model (nn.Module): The model to evaluate.
+        loader (DataLoader): Evaluation data loader.
+        criterion (nn.Module): Loss function.
+        device (torch.device): Device to use (CPU or GPU).
+
+    Returns:
+        tuple: (average_loss, accuracy, recall, precision, f1, auc, per_view_metrics)
+            - average_loss (float): Average evaluation loss
+            - accuracy (float): Classification accuracy
+            - recall (float): Macro-averaged recall score
+            - precision (float): Macro-averaged precision score
+            - f1 (float): Macro-averaged F1 score
+            - auc (float or None): Macro-averaged ROC AUC score if possible, None otherwise
+            - per_view_metrics (dict): Dictionary containing per-view metrics
+    """
     model.eval()
     total_loss = 0.0
     total_correct = 0
     total_samples = 0
-    all_preds, all_labels = [], []
+    all_preds, all_labels, all_probs = [], [], []
 
-    per_view = defaultdict(lambda: {"y_true": [], "y_pred": []})
+    per_view = defaultdict(lambda: {"y_true": [], "y_pred": [], "y_prob": []})
 
     with torch.no_grad():
         for batch_idx, (images, labels) in enumerate(tqdm(loader, desc="Evaluating", leave=False)):
             images, labels = images.to(device), labels.to(device)
             outputs = model(images)
+            probs = F.softmax(outputs, dim=1)
             loss = criterion(outputs, labels)
 
             preds = outputs.argmax(dim=1)
@@ -63,11 +87,13 @@ def evaluate_epoch(model, loader, criterion, device):
 
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
+            all_probs.extend(probs.cpu().numpy())
 
             if hasattr(loader.dataset, "samples"):
                 for i, (_, view) in enumerate(loader.dataset.samples[batch_idx * loader.batch_size: batch_idx * loader.batch_size + images.size(0)]):
                     per_view[view]["y_true"].append(labels[i].item())
                     per_view[view]["y_pred"].append(preds[i].item())
+                    per_view[view]["y_prob"].append(probs[i].cpu().tolist())
 
     accuracy = total_correct / total_samples
     avg_loss = total_loss / total_samples
@@ -75,14 +101,25 @@ def evaluate_epoch(model, loader, criterion, device):
     precision = precision_score(all_labels, all_preds, average='macro')
     f1 = f1_score(all_labels, all_preds, average='macro')
 
+    try:
+        auc = roc_auc_score(all_labels, all_probs, multi_class='ovr', average='macro')
+    except ValueError:
+        auc = None
+
     per_view_metrics = {}
     for view, d in per_view.items():
         if d["y_true"]:
+            try:
+                auc_score = roc_auc_score(d["y_true"], d["y_prob"], multi_class='ovr', average='macro')
+            except ValueError:
+                auc_score = None
+
             per_view_metrics[view] = {
-                "recall": recall_score(d["y_true"], d["y_pred"], average='macro'),
-                "precision": precision_score(d["y_true"], d["y_pred"], average='macro'),
-                "f1": f1_score(d["y_true"], d["y_pred"], average='macro'),
-                "accuracy": np.mean(np.array(d["y_true"]) == np.array(d["y_pred"]))
+                "recall": recall_score(d["y_true"], d["y_pred"], average='macro', zero_division=0),
+                "precision": precision_score(d["y_true"], d["y_pred"], average='macro', zero_division=0),
+                "f1": f1_score(d["y_true"], d["y_pred"], average='macro', zero_division=0),
+                "accuracy": np.mean(np.array(d["y_true"]) == np.array(d["y_pred"])),
+                "auc": auc_score
             }
 
     per_view_predictions = {
@@ -93,7 +130,7 @@ def evaluate_epoch(model, loader, criterion, device):
         for view, d in per_view.items()
     }
 
-    return accuracy, avg_loss, recall, precision, f1, per_view_metrics, per_view_predictions
+    return accuracy, avg_loss, recall, precision, f1, auc, per_view_metrics, per_view_predictions
 
 
 class Trainer:
@@ -129,6 +166,7 @@ class Trainer:
             "val_recall": [],
             "val_precision": [],
             "val_f1": [],
+            "val_auc": [],
             "val_views": defaultdict(list),
             "val_view_predictions": [],
         }
@@ -153,7 +191,7 @@ class Trainer:
 
             train_loss = train_epoch(self.model, train_loader, self.criterion, self.optimizer, self.device)
 
-            val_acc, val_loss, val_recall, val_precision, val_f1, val_views, val_view_predictions = evaluate_epoch(
+            val_acc, val_loss, val_recall, val_precision, val_f1, val_auc, val_views, val_view_predictions = evaluate_epoch(
                 self.model, val_loader, self.criterion, self.device
             )
 
@@ -163,12 +201,9 @@ class Trainer:
             self.history["val_recall"].append(val_recall)
             self.history["val_precision"].append(val_precision)
             self.history["val_f1"].append(val_f1)
+            self.history["val_auc"].append(val_auc)
 
-            if "val_view_predictions" not in self.history:
-                self.history["val_view_predictions"] = []
-
-            self.history["val_view_predictions"].append(val_view_predictions)
-
+            self.history.setdefault("val_view_predictions", []).append(val_view_predictions)
             for view, metrics in val_views.items():
                 for k, v in metrics.items():
                     self.history["val_views"][(view, k)].append(v)
@@ -180,10 +215,11 @@ class Trainer:
                 self.best_val_recall = val_recall
                 self.best_model_wts = self.model.state_dict()
 
+            auc_str = f"{val_auc:.4f}" if val_auc is not None else "N/A"
             print(
                 f"Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | "
-                f"Val Acc: {val_acc:.2f}% | Recall: {val_recall:.4f} | "
-                f"Precision: {val_precision:.4f} | F1: {val_f1:.4f}"
+                f"Val Acc: {val_acc:.4f} | Recall: {val_recall:.4f} | "
+                f"Precision: {val_precision:.4f} | F1: {val_f1:.4f} | AUC: {auc_str}"
             )
 
             if self.early_stopping:
@@ -193,12 +229,13 @@ class Trainer:
                     "val_recall": val_recall,
                     "val_precision": val_precision,
                     "val_f1": val_f1,
+                    "val_auc": val_auc
                 }.get(self.early_stopping.monitor)
 
                 if monitored_value is None:
                     raise ValueError(
                         f"Unknown metric: {self.early_stopping.monitor}. "
-                        f"Valid metrics are: val_loss, val_acc, val_recall, val_precision, val_f1"
+                        f"Valid metrics are: val_loss, val_acc, val_recall, val_precision, val_f1, val_auc"
                     )
 
                 stop = self.early_stopping.step(monitored_value)

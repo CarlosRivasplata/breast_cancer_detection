@@ -85,6 +85,7 @@ def plot_training_history(history, model_name="Model"):
     plt.plot(epochs, history["val_recall"], label="Recall")
     plt.plot(epochs, history["val_precision"], label="Precision")
     plt.plot(epochs, history["val_f1"], label="F1 Score")
+    plt.plot(epochs, history["val_auc"], label="AUC-ROC")
     for epoch in epochs:
         plt.axvline(x=epoch, color="gray", linestyle="--", linewidth=0.3)
     plt.xlabel("Epoch")

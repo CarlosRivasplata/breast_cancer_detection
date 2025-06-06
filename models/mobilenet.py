@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 from torchvision.models import mobilenet_v3_small, MobileNet_V3_Small_Weights
 from torchvision import transforms
@@ -63,3 +64,17 @@ class MobileNetModel(BaseModel):
             model.avgpool
         )
         return backbone
+
+    def extract_features(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Extract features from the input tensor using the model's backbone.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, channels, height, width)
+
+        Returns:
+            torch.Tensor: Extracted features from the model's backbone
+        """
+        x = self.get_backbone()(x)
+        x = torch.flatten(x, 1)
+        return x

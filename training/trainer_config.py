@@ -30,4 +30,4 @@ class TrainerConfig:
     gamma: float = 2.0  # For FocalLoss only
     early_stop_patience: int = 5
     scheduler_patience: int = 3
-    transforms: TransformConfig = field(default_factory=TransformConfig)
+    transforms: Optional[TransformConfig] = None
