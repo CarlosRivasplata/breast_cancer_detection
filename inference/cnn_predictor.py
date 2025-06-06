@@ -55,8 +55,10 @@ class CNNPredictor(PredictorInterface):
             logits = self.model(x)
             probs = torch.softmax(logits, dim=1).squeeze().cpu().numpy()
             pred = int(np.argmax(probs))
+            class_label = self.label_list[pred] if self.label_list and pred < len(self.label_list) else str(pred)
         return {
             "prediction": pred,
+            "class_label": class_label,
             "confidence": round(float(probs[pred]), 3),
             "all_probs": np.round(probs, 3)
         }

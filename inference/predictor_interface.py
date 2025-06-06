@@ -21,3 +21,10 @@ class PredictorInterface(ABC):
         Should return the same output as `predict()`, with optional label mapping.
         """
         pass
+
+    @abstractmethod
+    def predict_directory(self):
+        """
+        Load and preprocess images from a given directory, then run prediction.
+        """
+        pass
