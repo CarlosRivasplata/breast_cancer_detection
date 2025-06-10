@@ -33,11 +33,19 @@ class MobileNetModel(BaseModel):
             nn.Dropout(p=self.config.dropout_rate),
             nn.Linear(in_features, self.num_classes)
         )
+
         if self.config.freeze_base:
             for param in model.features.parameters():
                 param.requires_grad = False
+
+            if getattr(self.config, "freeze_mobilenet_last_blocks", False):
+                for block in model.features[-3:]:
+                    for param in block.parameters():
+                        param.requires_grad = True
+
             for param in model.classifier.parameters():
                 param.requires_grad = True
+
         return model
 
     def get_transforms(self, train: bool = True) -> transforms.Compose:

@@ -1,15 +1,18 @@
+import os
+import time
 from collections import defaultdict
 from typing import Any
 
 import numpy as np
+import psutil
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.metrics import f1_score, precision_score, recall_score, roc_auc_score
-from tqdm import tqdm
-from tqdm.notebook import tqdm
-from torch import nn
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+from tqdm import tqdm
+from tqdm.notebook import tqdm
 
 from training.early_stopping import EarlyStopping
 
@@ -95,6 +98,7 @@ def evaluate_epoch(model, loader, criterion, device):
                     per_view[view]["y_pred"].append(preds[i].item())
                     per_view[view]["y_prob"].append(probs[i].cpu().tolist())
 
+    # Global metrics
     accuracy = total_correct / total_samples
     avg_loss = total_loss / total_samples
     recall = recall_score(all_labels, all_preds, average='macro')
@@ -130,7 +134,42 @@ def evaluate_epoch(model, loader, criterion, device):
         for view, d in per_view.items()
     }
 
-    return accuracy, avg_loss, recall, precision, f1, auc, per_view_metrics, per_view_predictions
+    # Per-class metrics
+    n_classes = len(set(all_labels))
+    class_labels = loader.dataset.classes if hasattr(loader.dataset, "classes") else [f"class_{i}" for i in range(n_classes)]
+
+    per_class_metrics = {}
+    for i, label in enumerate(class_labels):
+        y_true_bin = np.array([1 if y == i else 0 for y in all_labels])
+        y_pred_bin = np.array([1 if y == i else 0 for y in all_preds])
+        prob_bin = np.array([p[i] for p in all_probs])
+
+        try:
+            auc_roc = roc_auc_score(y_true_bin, prob_bin)
+        except ValueError:
+            auc_roc = None
+
+        acc = np.mean(y_true_bin == y_pred_bin)
+
+        per_class_metrics[label] = {
+            "recall": recall_score(y_true_bin, y_pred_bin, zero_division=0),
+            "precision": precision_score(y_true_bin, y_pred_bin, zero_division=0),
+            "f1": f1_score(y_true_bin, y_pred_bin, zero_division=0),
+            "accuracy": acc,
+            "auc_roc": auc_roc
+        }
+
+    return (
+        accuracy,
+        avg_loss,
+        recall,
+        precision,
+        f1,
+        auc,
+        per_view_metrics,
+        per_view_predictions,
+        per_class_metrics
+    )
 
 
 class Trainer:
@@ -169,6 +208,9 @@ class Trainer:
             "val_auc": [],
             "val_views": defaultdict(list),
             "val_view_predictions": [],
+            "val_class_metrics": [],
+            "epoch_time": [],
+            "max_memory_mb": [],
         }
 
         self.best_model_wts = None
@@ -188,12 +230,27 @@ class Trainer:
         """
         for epoch in range(epochs):
             print(f"\nEpoch {epoch + 1}/{epochs}")
+            start_time = time.time()
+
+            if torch.cuda.is_available():
+                torch.cuda.reset_peak_memory_stats(self.device)
 
             train_loss = train_epoch(self.model, train_loader, self.criterion, self.optimizer, self.device)
 
-            val_acc, val_loss, val_recall, val_precision, val_f1, val_auc, val_views, val_view_predictions = evaluate_epoch(
+            val_acc, val_loss, val_recall, val_precision, val_f1, val_auc, val_views, val_view_predictions, val_class_metrics  = evaluate_epoch(
                 self.model, val_loader, self.criterion, self.device
             )
+
+            elapsed_time = time.time() - start_time
+            self.history["epoch_time"].append(elapsed_time)
+
+            if torch.cuda.is_available():
+                mem_bytes = torch.cuda.max_memory_allocated(self.device)
+                self.history["max_memory_mb"].append(mem_bytes / 1024 ** 2)  # in MB
+            else:
+                process = psutil.Process(os.getpid())
+                mem_bytes = process.memory_info().rss
+                self.history["max_memory_mb"].append(mem_bytes / 1024 ** 2)
 
             self.history["train_loss"].append(train_loss)
             self.history["val_loss"].append(val_loss)
@@ -203,13 +260,20 @@ class Trainer:
             self.history["val_f1"].append(val_f1)
             self.history["val_auc"].append(val_auc)
 
+            # Flatten per-class metrics into individual history keys for plotting
+            self.history.setdefault("val_class_metrics", []).append(val_class_metrics)
+            for class_name, metrics in val_class_metrics.items():
+                for metric_name, value in metrics.items():
+                    key = f"{class_name}_{metric_name}"
+                    self.history.setdefault(key, []).append(value)
+
             self.history.setdefault("val_view_predictions", []).append(val_view_predictions)
             for view, metrics in val_views.items():
                 for k, v in metrics.items():
                     self.history["val_views"][(view, k)].append(v)
 
             if self.scheduler:
-                self.scheduler.step(val_acc)
+                self.scheduler.step(val_recall)
 
             if val_recall > self.best_val_recall:
                 self.best_val_recall = val_recall
@@ -219,7 +283,8 @@ class Trainer:
             print(
                 f"Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | "
                 f"Val Acc: {val_acc:.4f} | Recall: {val_recall:.4f} | "
-                f"Precision: {val_precision:.4f} | F1: {val_f1:.4f} | AUC: {auc_str}"
+                f"Precision: {val_precision:.4f} | F1: {val_f1:.4f} | AUC: {auc_str} | "
+                f"Time: {elapsed_time:.2f}s | Max Mem: {self.history['max_memory_mb'][-1]:.2f} MB"
             )
 
             if self.early_stopping:

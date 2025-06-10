@@ -21,8 +21,11 @@ class BaseModel(ABC):
                 transforms.RandomRotation(degrees=t.rotation_degrees),
                 transforms.RandomAffine(degrees=0, translate=(t.translate, t.translate), scale=(t.scale_min, t.scale_max)),
                 transforms.ColorJitter(brightness=t.brightness, contrast=t.contrast),
-                transforms.GaussianBlur(kernel_size=3, sigma=(t.blur_sigma_min, t.blur_sigma_max))
             ]
+            if t.blur_sigma_min < t.blur_sigma_max and t.blur_sigma_max > 0.0:
+                transform_list.append(
+                    transforms.GaussianBlur(kernel_size=3, sigma=(t.blur_sigma_min, t.blur_sigma_max))
+                )
 
         transform_list += [
             transforms.ToTensor(),

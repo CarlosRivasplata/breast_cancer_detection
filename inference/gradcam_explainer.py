@@ -1,48 +1,72 @@
-from pytorch_grad_cam import GradCAM
-from pytorch_grad_cam.utils.image import show_cam_on_image
-from torchvision.transforms import ToTensor
-from inference.explainer_interface import ExplainerInterface
-import torch
 import numpy as np
 from PIL import Image
+import torch
+from pytorch_grad_cam import GradCAM
+from pytorch_grad_cam.utils.image import show_cam_on_image
+from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 
 
-class GradCAMExplainer(ExplainerInterface):
+class GradCAMExplainer:
     def __init__(self, predictor, target_layer=None):
         """
-        Initialize the GradCAM explainer.
+        GradCAM explainer for ResNet50, EfficientNetB0, and MobileNetV3.
 
         Args:
-            predictor: A predictor object that contains the model and transforms
-            target_layer: The target layer to generate GradCAM for. If None, uses the last layer of ResNet's layer4
+            predictor: CNNPredictor with .model, .device, and .transform
+            target_layer (nn.Module): Optionally specify the exact target layer
         """
         self.predictor = predictor
         self.model = predictor.model
         self.device = predictor.device
         self.transform = predictor.transform
 
-        if target_layer is None:
-            self.target_layer = self.model.layer4[-1]
-        else:
-            self.target_layer = target_layer
+        self.model.to(self.device)
+        self.model.eval()
 
-    def explain(self, image: Image.Image) -> np.ndarray:
+        self.target_layer = target_layer or self._infer_target_layer()
+
+    def _infer_target_layer(self):
+        name = self.model.__class__.__name__.lower()
+
+        if "resnet" in name:
+            return self.model.layer4[-1]
+
+        elif "efficientnet" in name:
+            return self.model.features[-1]
+
+        elif "mobilenet" in name:
+            return self.model.features[-1]
+
+        else:
+            raise ValueError(f"Unsupported model type: {name}. Please provide target_layer explicitly.")
+
+    def _unnormalize(self, tensor):
         """
-        Generate a GradCAM explanation for the input image.
+        Undo normalization (assumes ImageNet mean/std).
+        """
+        mean = np.array([0.485, 0.456, 0.406])
+        std = np.array([0.229, 0.224, 0.225])
+        image = tensor.squeeze(0).cpu().numpy().transpose(1, 2, 0)
+        return (image * std + mean).clip(0, 1)
+
+    def explain(self, image: Image.Image, class_idx: int = None) -> np.ndarray:
+        """
+        Generate GradCAM heatmap overlay for a given image.
 
         Args:
-            image (PIL.Image): Input image to explain
+            image (PIL.Image): Input image
+            class_idx (int, optional): Class index to explain. If None, top predicted class is used.
 
         Returns:
-            PIL.Image: GradCAM visualization overlaid on the input image
+            np.ndarray: Heatmap-overlaid image in RGB format
         """
-        input_tensor = self.transform(image).unsqueeze(0).to(self.device)
-        resized_image = image.resize((input_tensor.shape[-1], input_tensor.shape[-2]))  # Match model input size
-        rgb_img = np.array(resized_image).astype(np.float32) / 255.0
+        resized_image = image.resize((224, 224))
+        input_tensor = self.transform(resized_image).unsqueeze(0).to(self.device)
 
-        self.model.to(self.device)
-        cam = GradCAM(model=self.model, target_layers=[self.target_layer], reshape_transform=None)
-        
-        grayscale_cam = cam(input_tensor=input_tensor)[0]
-        cam_image = show_cam_on_image(rgb_img, grayscale_cam, use_rgb=True)
-        return cam_image
+        rgb_img = self._unnormalize(input_tensor)
+
+        with GradCAM(model=self.model, target_layers=[self.target_layer]) as cam:
+            targets = [ClassifierOutputTarget(class_idx)] if class_idx is not None else None
+            grayscale_cam = cam(input_tensor=input_tensor, targets=targets)[0]
+            cam_image = show_cam_on_image(rgb_img, grayscale_cam, use_rgb=True)
+            return cam_image

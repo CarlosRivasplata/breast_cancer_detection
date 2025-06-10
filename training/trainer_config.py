@@ -27,7 +27,11 @@ class TrainerConfig:
     lr: float = 1e-4
     weight_decay: float = 1e-4
     batch_size: int = 70
-    gamma: float = 2.0  # For FocalLoss only
+    gamma: float = 1.0  # For FocalLoss only
     early_stop_patience: int = 5
     scheduler_patience: int = 3
     transforms: Optional[TransformConfig] = None
+    alpha: Optional[list[float]] = None
+    freeze_resnet_last_three_layers: bool = True
+    freeze_efficientnet_last_blocks: bool = True
+    freeze_mobilenet_last_blocks: bool = True

@@ -36,8 +36,14 @@ class ResNetModel(BaseModel):
         if self.config.freeze_base:
             for param in model.parameters():
                 param.requires_grad = False
-            for param in model.fc.parameters():
-                param.requires_grad = True
+
+            if getattr(self.config, "freeze_resnet_last_three_layers", False):
+                for layer in [model.layer3, model.layer4, model.fc]:
+                    for param in layer.parameters():
+                        param.requires_grad = True
+            else:
+                for param in model.fc.parameters():
+                    param.requires_grad = True
         return model
 
     def get_transforms(self, train: bool = True) -> transforms.Compose:

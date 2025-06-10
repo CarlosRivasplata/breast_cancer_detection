@@ -107,3 +107,35 @@ def plot_training_history(history, model_name="Model"):
         plt.legend()
         plt.tight_layout()
         plt.show()
+
+    if "epoch_time" in history and "max_memory_mb" in history:
+        plot_training_profiling(history, model_name)
+
+def plot_training_profiling(history, model_name="Model"):
+    """
+    Plot training time and peak memory usage per epoch.
+
+    Args:
+        history (dict): Output from `trainer.get_history()`.
+        model_name (str): Optional label for the plot title.
+    """
+    epochs = range(1, len(history["epoch_time"]) + 1)
+
+    fig, ax1 = plt.subplots(figsize=(12, 5))
+
+    # Plot training time
+    ax1.plot(epochs, history["epoch_time"], label="Epoch Time (s)", color="tab:blue")
+    ax1.set_xlabel("Epoch")
+    ax1.set_ylabel("Time (s)", color="tab:blue")
+    ax1.tick_params(axis="y", labelcolor="tab:blue")
+    ax1.set_title(f"{model_name} - Profiling Metrics")
+
+    # Add memory on secondary y-axis
+    ax2 = ax1.twinx()
+    ax2.plot(epochs, history["max_memory_mb"], label="Max Memory (MB)", color="tab:red")
+    ax2.set_ylabel("Memory (MB)", color="tab:red")
+    ax2.tick_params(axis="y", labelcolor="tab:red")
+
+    fig.tight_layout()
+    fig.legend(loc="upper right")
+    plt.show()
