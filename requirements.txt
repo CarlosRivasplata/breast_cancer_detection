@@ -17,3 +17,9 @@ tqdm>=4.66.0
 
 # CLI utilities
 argparse; python_version < "3.10"  # Only needed for older Python
+
+# Dashboard dependencies
+streamlit>=1.32.0
+matplotlib>=3.8.0
+seaborn>=0.13.0
+pytorch-grad-cam>=0.6.0
