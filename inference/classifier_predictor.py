@@ -27,7 +27,7 @@ class ClassifierPredictor(PredictorInterface):
         self.strategy.scaler = data["scaler"]
         self.label_list = label_list or ["CLASS_0", "CLASS_1", "CLASS_2"]
 
-    def predict(self, image: Image.Image) -> dict:
+    def predict(self, data) -> dict:
         """
         Predict the class of a single PIL image using handcrafted features.
 
@@ -41,14 +41,7 @@ class ClassifierPredictor(PredictorInterface):
                 "all_probs": np.ndarray
             }
         """
-        img_gray = image.convert("L")
-        img_array = np.array(img_gray).astype(np.float32)
-        img_array = (img_array - np.min(img_array)) / (np.max(img_array) - np.min(img_array) + 1e-8)
-
-        features = np.array([[img_array.mean(), img_array.std(), img_array.shape[1], img_array.shape[0]]])
-        features_scaled = self.strategy.scaler.transform(features)
-
-        probs = self.strategy.model.predict_proba(features_scaled)[0]
+        probs = self.strategy.model.predict_proba(data)[0]
         pred = int(np.argmax(probs))
         class_label = self.label_list[pred] if pred < len(self.label_list) else str(pred)
 
