@@ -1,6 +1,6 @@
 from datetime import datetime
 from pathlib import Path
-from typing import Union
+from typing import Dict, List, Union
 
 import csv
 import joblib
@@ -23,34 +23,55 @@ class ClassifierPredictor(PredictorInterface):
         """
         self.strategy = strategy
         data = joblib.load(model_path)
-        self.strategy.model = data["model"]
-        self.strategy.scaler = data["scaler"]
+        if isinstance(data, dict) and "model" in data and "scaler" in data:
+            self.strategy.model = data["model"]
+            self.strategy.scaler = data["scaler"]
+        else:
+            # Legacy: just a model, no scaler
+            self.strategy.model = data
+            self.strategy.scaler = None
         self.label_list = label_list or ["CLASS_0", "CLASS_1", "CLASS_2"]
 
-    def predict(self, data) -> dict:
+    def predict_features(self, features) -> dict:
         """
-        Predict the class of a single PIL image using handcrafted features.
-
+        Predict the class given a feature vector (1D or 2D array).
         Args:
-            image (PIL.Image): Input image
-
+            features (array-like): Feature vector (1D or 2D)
         Returns:
             dict: {
-                "prediction": str,
+                "prediction": int,
+                "class_label": str,
                 "confidence": float,
                 "all_probs": np.ndarray
             }
         """
-        probs = self.strategy.model.predict_proba(data)[0]
+        features = np.asarray(features)
+        if features.ndim == 1:
+            features = features.reshape(1, -1)
+        if self.strategy.scaler is not None:
+            features_scaled = self.strategy.scaler.transform(features)
+        else:
+            features_scaled = features
+        probs = self.strategy.model.predict_proba(features_scaled)[0]
         pred = int(np.argmax(probs))
         class_label = self.label_list[pred] if pred < len(self.label_list) else str(pred)
-
         return {
             "prediction": pred,
             "class_label": class_label,
             "confidence": round(float(probs[pred]), 3),
             "all_probs": np.round(probs, 3)
         }
+
+    def predict(self, image: Image.Image) -> dict:
+        """
+        Predict the class of a single PIL image using handcrafted features.
+        Uses only mean, std, width, height.
+        """
+        img_gray = image.convert("L")
+        img_array = np.array(img_gray).astype(np.float32)
+        img_array = (img_array - np.min(img_array)) / (np.max(img_array) - np.min(img_array) + 1e-8)
+        features = np.array([img_array.mean(), img_array.std(), img_array.shape[1], img_array.shape[0]])
+        return self.predict_features(features)
     
     def predict_from_path(self, image_path: Union[str, Image.Image]) -> dict:
         """
@@ -84,7 +105,7 @@ class ClassifierPredictor(PredictorInterface):
         output_file_name: str = "inference.csv",
         recursive: bool = False,
         allowed_exts={".dcm", ".jpg", ".jpeg", ".png"}
-    ) -> list[dict]:
+    ) -> list[Dict]:
         """
         Predict on all images in a directory and write results to a timestamped CSV.
 
