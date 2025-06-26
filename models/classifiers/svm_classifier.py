@@ -45,7 +45,7 @@ class SVMClassifier(BaseClassifier):
 
             grid.fit(X_scaled, y)
 
-            print("📌 Mejor combinación encontrada:")
+            print(" Mejor combinación encontrada:")
             print(grid.best_params_)
             print(f"F1 ponderado en validación cruzada: {grid.best_score_:.4f}")
 
